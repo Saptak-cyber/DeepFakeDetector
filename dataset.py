@@ -27,27 +27,33 @@ class DeepfakeWindowDataset(Dataset):
         # Celeb-real
         real_celeb_files = glob.glob(os.path.join(split_dir, "Celeb-real", "*.pt"))
         for f in real_celeb_files:
-            data = torch.load(f, map_location='cpu')
+            data = torch.load(f, map_location='cpu', weights_only=False)
             num_windows = data['num_windows']
+            # Only add windows that have exactly 30 frames
             for i in range(num_windows):
-                self.samples.append((f, i, 0.0))
+                if data['windows'][i].shape[0] == 30:
+                    self.samples.append((f, i, 0.0))
         
         # YouTube-real
         real_youtube_files = glob.glob(os.path.join(split_dir, "YouTube-real", "*.pt"))
         for f in real_youtube_files:
-            data = torch.load(f, map_location='cpu')
+            data = torch.load(f, map_location='cpu', weights_only=False)
             num_windows = data['num_windows']
+            # Only add windows that have exactly 30 frames
             for i in range(num_windows):
-                self.samples.append((f, i, 0.0))
+                if data['windows'][i].shape[0] == 30:
+                    self.samples.append((f, i, 0.0))
         
         # 2. Load Fake Videos (Label = 1.0)
         # Celeb-synthesis
         fake_files = glob.glob(os.path.join(split_dir, "Celeb-synthesis", "*.pt"))
         for f in fake_files:
-            data = torch.load(f, map_location='cpu')
+            data = torch.load(f, map_location='cpu', weights_only=False)
             num_windows = data['num_windows']
+            # Only add windows that have exactly 30 frames
             for i in range(num_windows):
-                self.samples.append((f, i, 1.0))
+                if data['windows'][i].shape[0] == 30:
+                    self.samples.append((f, i, 1.0))
         
         print(f"{split.upper()} Dataset: {len(self.samples)} total windows "
               f"({len(real_celeb_files)} Celeb-real + {len(real_youtube_files)} YouTube-real + "
@@ -60,7 +66,7 @@ class DeepfakeWindowDataset(Dataset):
         path, window_idx, label = self.samples[idx]
         
         # Load the file
-        data = torch.load(path, map_location='cpu')
+        data = torch.load(path, map_location='cpu', weights_only=False)
         
         # Extract the specific window: Shape (30, 3, 224, 224)
         window_tensor = data['windows'][window_idx]

@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import GradScaler, autocast
 import os
 from tqdm import tqdm
 import time
@@ -25,7 +25,7 @@ def train_epoch(model, dataloader, criterion, optimizer, device, scaler=None):
         
         # Mixed precision training if scaler is provided
         if scaler is not None:
-            with autocast():
+            with autocast('cuda'):
                 outputs = model(inputs).squeeze()
                 loss = criterion(outputs, labels)
             
@@ -40,7 +40,7 @@ def train_epoch(model, dataloader, criterion, optimizer, device, scaler=None):
         
         # Statistics
         running_loss += loss.item()
-        predicted = (outputs > 0.5).float()
+        predicted = (torch.sigmoid(outputs) > 0.5).float()
         total += labels.size(0)
         correct += (predicted == labels).sum().item()
         
@@ -71,7 +71,7 @@ def validate(model, dataloader, criterion, device):
             loss = criterion(outputs, labels)
             
             running_loss += loss.item()
-            predicted = (outputs > 0.5).float()
+            predicted = (torch.sigmoid(outputs) > 0.5).float()
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
     
@@ -83,7 +83,6 @@ def validate(model, dataloader, criterion, device):
 
 def train_model(
     data_dir,
-    model_type='efficientnet',
     freeze_cnn=False,
     batch_size=4,
     num_epochs=10,
@@ -96,7 +95,6 @@ def train_model(
     
     Args:
         data_dir: Path to celebdf_processed_data
-        model_type: 'efficientnet' or 'mobilenet'
         freeze_cnn: Whether to freeze CNN weights
         batch_size: Batch size (reduce if OOM errors)
         num_epochs: Number of training epochs
@@ -116,23 +114,23 @@ def train_model(
     train_loader, val_loader, test_loader = create_dataloaders(
         data_dir, 
         batch_size=batch_size,
-        num_workers=2
+        num_workers=4  # Increase for faster data loading
     )
     
     # Create model
-    print(f"\nInitializing {model_type} model...")
-    model = get_model(model_type=model_type, freeze_cnn=freeze_cnn)
+    print(f"\nInitializing ResNeXt50+GRU model...")
+    model = get_model(freeze_cnn=freeze_cnn)
     model = model.to(device)
     
-    # Loss and optimizer
-    criterion = nn.BCELoss()
+    # Loss and optimizer (BCEWithLogitsLoss is safe for autocast)
+    criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=2, verbose=True
+        optimizer, mode='min', factor=0.5, patience=2
     )
     
     # Mixed precision scaler
-    scaler = GradScaler() if use_amp and device == 'cuda' else None
+    scaler = GradScaler('cuda') if use_amp and device == 'cuda' else None
     
     # Training loop
     print("\nStarting training...")
@@ -198,8 +196,7 @@ if __name__ == "__main__":
     # Train the model
     model = train_model(
         data_dir=DATA_DIR,
-        model_type='efficientnet',  # or 'mobilenet' for faster training
-        freeze_cnn=False,            # Set True to freeze CNN weights
+        freeze_cnn=False,            # Set True to freeze CNN weights (faster training)
         batch_size=4,                # Reduce to 2 if OOM errors
         num_epochs=10,
         learning_rate=0.0001,
@@ -209,3 +206,23 @@ if __name__ == "__main__":
     
     print("\n✓ Model training completed!")
     print("Checkpoints saved in 'checkpoints/' directory")
+    
+    # Automatically run evaluation on test set
+    print("\n" + "="*60)
+    print("Starting automatic evaluation on test set...")
+    print("="*60)
+    
+    try:
+        from evaluate import evaluate_model
+        
+        test_metrics = evaluate_model(
+            model_path='checkpoints/best_model.pth',
+            data_dir=DATA_DIR,
+            batch_size=4,
+            split='test'
+        )
+        
+        print("\n✓ Evaluation completed! Check evaluation_test_metrics.png for visualizations.")
+    except Exception as e:
+        print(f"\n⚠ Could not run automatic evaluation: {e}")
+        print("You can manually run: python evaluate.py")
